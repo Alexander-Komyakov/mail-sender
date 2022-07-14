@@ -1,0 +1,104 @@
+#!/usr/bin/expect -f
+
+set timeout 3
+
+#читаем принимаемые параметры
+
+#логин/отправитель
+set usermail [lindex $argv 0]
+#получатель/ли
+set recmail [lindex $argv 1]
+#зашифрованный логин пароль
+set base64mail [lindex $argv 2]
+set base64pass [lindex $argv 3]
+#текст письма
+set datamail [lindex $argv 4]
+
+#разбираем на строку на слова
+set recmail [split $recmail]
+set datamail [split $datamail '\n']
+proc sendMessage {usermail recmail base64mail base64pass datamail} {
+	#запускаем smtp в open ssl
+	#mail.ru
+	spawn openssl s_client -quiet -connect smtp.mail.ru:465
+	expect {
+		"mail.ru" { send "EHLO mail.ru\n" }
+		#если время вышло
+		timeout { return 1 }
+		#если ошибка
+		default {
+			puts "No Ethernet connection"
+			exit 1
+		}
+	}
+	expect {
+		"XOAUTH2" { send "AUTH LOGIN\n" }
+		#если ошибка
+		timeout { return 1 }
+	}
+	expect {
+		"WU6" { send $base64mail\n }
+		timeout { return 1 }
+	}
+	expect {
+		"Q6" {send $base64pass\n}
+		timeout { return 1 }
+	}
+	expect {
+		"succeeded" {
+			send "mail from:"
+			send $usermail\n 
+		}
+		timeout { return 1 }
+	}
+	expect {
+		"250 OK" {
+			#перебираем отправителей
+			for {set i 0} {$i < [llength $recmail]} {incr i} {
+				send "rcpt to:"
+				send [lindex $recmail $i]\n
+			}
+		}
+		timeout { return 1 }
+	}
+	expect {
+		"250 Accepted" {
+			send "data\n"
+			sleep 1
+		}
+		timeout { return 1 }
+	}
+	expect {
+		"by itself" {
+			for {set i 0} {$i < [llength $datamail]} {incr i} {
+				send [lindex $datamail $i]\n
+				sleep 0.01 
+			}
+			send "\n.\n"
+		}
+		timeout { return 1 }
+	}
+	expect {
+		"250 OK*" { 
+			send "quit\n" 
+			return 0
+		}
+		timeout { return 1 }
+		#ошибка
+		#если данные не отправились
+		default { return 2 }
+	}
+}
+set good 2
+while {$good == 2} {
+	set good [sendMessage $usermail $recmail $base64mail $base64pass $datamail]
+	#если ошибка 1
+	if {$good == 1} {
+		puts "Error. See above"
+		exit 1
+	}
+	#если ошибка 2, пытаемся отправить повторно
+}
+puts "Message succesed sent"
+exit 0
+expect eof
